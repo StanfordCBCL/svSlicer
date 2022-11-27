@@ -30,3 +30,17 @@
 *.exe
 *.out
 *.app
+
+# macOS file system
+.DS_Store
+
+# Build folders
+Debug
+Release
+
+# Documentation
+docs/html
+
+# Others
+*.vscode
+
