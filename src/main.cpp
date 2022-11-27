@@ -64,5 +64,5 @@ int main(int argc, char* argv[]) {
     cl_reader->Update();
     auto cl_polydata = vtkSmartPointer<vtkPolyData>::New();
     cl_polydata->DeepCopy(cl_reader->GetOutput());
-    std::cout << cl_polydata->GetNumberOfVerts() << std::endl;
+    std::cout << cl_polydata->GetNumberOfCells() << std::endl;
 }
