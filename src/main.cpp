@@ -37,15 +37,24 @@ bool starts_with(std::string& string, std::string prefix)
 int main(int argc, char* argv[]) {
 
     if (argc < 3) {
-        std::cout << "Not enough input arguments." << std::endl;
+        std::cerr << "Not enough input arguments." << std::endl;
         return EXIT_FAILURE;
     }
 
-    // Check if centerline files exist
+    // Check if result file exists
+    std::string result_file_name = argv[1];
+    if (std::filesystem::exists(result_file_name) == false)
+    {
+        std::cerr << "3D result file '" << result_file_name << "' does not exist" << std::endl;
+        return EXIT_FAILURE;
+    }
+
+    // Check if centerline file exists
     std::string cl_file_name = argv[2];
     if (std::filesystem::exists(cl_file_name) == false)
     {
-        throw std::runtime_error("Centerline file does not exist!");
+        std::cerr << "Centerline file '" << cl_file_name << "' does not exist" << std::endl;
+        return EXIT_FAILURE;
     }
 
     // Read in the centerline file.
