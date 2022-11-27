@@ -37,7 +37,7 @@ bool starts_with(std::string& string, std::string prefix)
 int main(int argc, char* argv[]) {
 
     if (argc < 3) {
-        std::cerr << "Not enough input arguments." << std::endl;
+        std::cerr << "ERROR: Not enough input arguments." << std::endl;
         return EXIT_FAILURE;
     }
 
@@ -45,7 +45,7 @@ int main(int argc, char* argv[]) {
     std::string result_file_name = argv[1];
     if (std::filesystem::exists(result_file_name) == false)
     {
-        std::cerr << "3D result file '" << result_file_name << "' does not exist" << std::endl;
+        std::cerr << "ERROR: 3D result file '" << result_file_name << "' does not exist" << std::endl;
         return EXIT_FAILURE;
     }
 
@@ -53,15 +53,16 @@ int main(int argc, char* argv[]) {
     std::string cl_file_name = argv[2];
     if (std::filesystem::exists(cl_file_name) == false)
     {
-        std::cerr << "Centerline file '" << cl_file_name << "' does not exist" << std::endl;
+        std::cerr << "ERROR: Centerline file '" << cl_file_name << "' does not exist" << std::endl;
         return EXIT_FAILURE;
     }
 
     // Read in the centerline file.
-    std::cout << "Reading centerline file: " << cl_file_name << std::endl;
+    std::cout << "Reading centerline file '" << cl_file_name << "'" << std::endl;
     auto cl_reader = vtkSmartPointer<vtkXMLPolyDataReader>::New();
     cl_reader->SetFileName(cl_file_name.c_str());
     cl_reader->Update();
     auto cl_polydata = vtkSmartPointer<vtkPolyData>::New();
     cl_polydata->DeepCopy(cl_reader->GetOutput());
+    std::cout << cl_polydata->GetNumberOfVerts() << std::cout;
 }
