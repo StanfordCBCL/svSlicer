@@ -9,6 +9,7 @@
 #include <stdexcept>
 
 #include <vtkXMLPolyDataReader.h>
+#include <vtkCleanPolyData.h>
 
 /**
  * @brief Check if given string starts with a certain prefix
