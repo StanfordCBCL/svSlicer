@@ -11,5 +11,4 @@ jobs:
           sudo apt install clang-format
       - name: Run clang-format
         run: |
-          cd src
           clang-format --dry-run --style=file:.clang_format --Werror src/main.cpp

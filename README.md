@@ -1,5 +1,6 @@
 <div align="center">
 <h1>svSlicer</h1>
+</div>
 
 svSlicer is a tool for mapping 3D simulation results from SimVascular
 software to a centerline. The quantities of interest, namely "pressure" and
