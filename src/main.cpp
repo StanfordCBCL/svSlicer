@@ -408,7 +408,7 @@ int main(int argc, char *argv[])
             "CenterlineSectionNormal"));
     auto centerline_max_size = vtkDoubleArray::SafeDownCast(
         centerline_polydata->GetPointData()->GetArray(
-            "CenterlineSectionMaxSize"));
+            "MaximumInscribedSphereRadius"));
 
     // Prepare area array
     auto area = vtkSmartPointer<vtkDoubleArray>::New();
@@ -446,7 +446,7 @@ int main(int argc, char *argv[])
     std::cout << "Extract slices" << std::endl;
     int num_slices_processed = 0;
 #pragma omp parallel for schedule(dynamic)
-    for (int i = 0; i < 10; i++)
+    for (int i = 0; i < num_centerline_points; i++)
     {
         // Extract thread information
         int my_slice;
@@ -524,7 +524,7 @@ int main(int argc, char *argv[])
             {
                 normal[j] = normal[j] / nnorm;
             }
-            srad = (maxsize1[0] * (1.0 - weight) + maxsize2[0] * weight) * 0.55;
+            srad = (maxsize1[0] * (1.0 - weight) + maxsize2[0] * weight) * 1.5;
 
             // Find cells of interest by searching in radius around position
             auto selected_cells = vtkSmartPointer<vtkIdList>::New();

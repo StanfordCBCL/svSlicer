@@ -38,9 +38,6 @@
 Debug
 Release
 
-# Documentation
-docs/html
-
 # Others
 *.vscode
 
