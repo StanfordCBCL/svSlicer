@@ -8,12 +8,12 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-18.04, ubuntu-20.04, ubuntu-22.04]
+        os: [ubuntu-22.04]
       fail-fast: false
     steps:
       - uses: actions/checkout@v2
       - name: Install ubuntu dependencies
-        run: sudo apt update && sudo apt install build-essential cmake libvtk9-dev
+        run: sudo apt update && sudo apt install build-essential cmake libvtk9-dev qt5-default
       - name: Build svZeroDSolver
         run: |
           mkdir Release
