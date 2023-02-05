@@ -1,6 +1,13 @@
-# svSlicer
+<div align="center">
+<h1>svSlicer</h1>
 
-Modified version of slice extractor from
+svSlicer is a tool for mapping 3D simulation results from SimVascular
+software to a centerline. The quantities of interest, namely "pressure" and
+"velocity" area extracted from the 3D results, sliced at each centerline point,
+and integrated over the respective area of the slice to derive scaler quantities
+"pressure" and "flow".
+
+> Modified version of slice extractor from
 https://github.com/lucapegolotti/cardiovascular/tree/master/slice-vtu-results-centerlines/c++
 
 ## Build
