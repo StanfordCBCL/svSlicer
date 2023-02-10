@@ -3,18 +3,18 @@
  * @brief Main svslicer routine.
  *
  */
-#include <vtkCellCenters.h>
+#include <omp.h>
 #include <vtkCellData.h>
 #include <vtkCleanPolyData.h>
-#include <vtkContourGrid.h>
+#include <vtkCutter.h>
 #include <vtkDoubleArray.h>
-#include <vtkExtractCells.h>
-#include <vtkKdTree.h>
+#include <vtkPlane.h>
 #include <vtkPointData.h>
 #include <vtkPolyDataConnectivityFilter.h>
 #include <vtkTriangle.h>
 #include <vtkUnstructuredGrid.h>
 #include <vtkXMLPolyDataReader.h>
+#include <vtkXMLPolyDataWriter.h>
 #include <vtkXMLUnstructuredGridReader.h>
 
 #include <filesystem>
@@ -167,72 +167,20 @@ void clean_up_cell_data(vtkSmartPointer<T> data_pointer,
 vtkSmartPointer<vtkPolyData> get_clean_slice(double position[3],
                                              vtkSmartPointer<vtkPolyData> slice)
 {
+    // Extract clean poly data
+    auto clean_filter = vtkSmartPointer<vtkCleanPolyData>::New();
+    clean_filter->SetInputData(slice);
+    clean_filter->Update();
+
     // Create connectivity filter that separates loose parts of the slice
     auto conn_filter = vtkSmartPointer<vtkPolyDataConnectivityFilter>::New();
-    conn_filter->SetInputData(slice);
-    conn_filter->SetExtractionModeToSpecifiedRegions();
+    conn_filter->SetInputData(clean_filter->GetOutput());
+    conn_filter->SetExtractionModeToClosestPointRegion();
+    conn_filter->SetClosestPoint(position);
+    auto clean_slice = vtkSmartPointer<vtkPolyData>::New();
+    conn_filter->Update();
+    clean_slice->DeepCopy(conn_filter->GetOutput());
 
-    // Minimum distance of a center of a slice region to the position
-    double min_distance = 1e6;
-
-    // ID of the current region of the slice filter with connectivity filter
-    int region_id = 0;
-
-    // Center of the current slice region
-    double center[3] = {0.0, 0.0, 0.0};
-
-    // Clean slice
-    vtkSmartPointer<vtkPolyData> clean_slice;
-    while (true)
-    {
-        // Extract next slice region and delete it from the filter
-        auto current_slice_region = vtkSmartPointer<vtkPolyData>::New();
-        conn_filter->AddSpecifiedRegion(region_id);
-        conn_filter->Update();
-        current_slice_region->DeepCopy(conn_filter->GetOutput());
-        if (current_slice_region->GetNumberOfCells() <= 0)
-        {
-            break;
-        }
-        conn_filter->DeleteSpecifiedRegion(region_id);
-
-        // Extract clean poly data
-        auto clean_filter = vtkSmartPointer<vtkCleanPolyData>::New();
-        clean_filter->SetInputData(current_slice_region);
-        clean_filter->Update();
-        current_slice_region->DeepCopy(clean_filter->GetOutput());
-
-        // Determine distance between center of all slice points and the
-        // position
-        auto region_points = current_slice_region->GetPoints();
-        int num_comp_points = current_slice_region->GetNumberOfPoints();
-        double cx = 0.0;
-        double cy = 0.0;
-        double cz = 0.0;
-        for (int i = 0; i < num_comp_points; i++)
-        {
-            double pt[3];
-            region_points->GetPoint(i, pt);
-            cx += pt[0];
-            cy += pt[1];
-            cz += pt[2];
-        }
-        center[0] = cx / num_comp_points;
-        center[1] = cy / num_comp_points;
-        center[2] = cz / num_comp_points;
-        double d = (center[0] - position[0]) * (center[0] - position[0]) +
-                   (center[1] - position[1]) * (center[1] - position[1]) +
-                   (center[2] - position[2]) * (center[2] - position[2]);
-
-        // If current distance is closer than the distances before, keep slice
-        // region as clean slice
-        if (d < min_distance)
-        {
-            min_distance = d;
-            clean_slice = current_slice_region;
-        }
-        region_id += 1;
-    }
     return clean_slice;
 }
 
@@ -389,41 +337,23 @@ int main(int argc, char *argv[])
 
     // Add a point data array to store plane distance.
     int num_pts = result_unstructured_grid->GetNumberOfPoints();
-    auto plane_dist = vtkSmartPointer<vtkDoubleArray>::New();
-    plane_dist->SetName("plane_dist");
-    plane_dist->SetNumberOfComponents(1);
-    plane_dist->SetNumberOfTuples(num_pts);
-    for (int i = 0; i < num_pts; i++)
-    {
-        plane_dist->SetValue(i, 0.0);
-    }
-    result_unstructured_grid->GetPointData()->AddArray(plane_dist);
-    result_unstructured_grid->GetPointData()->SetActiveScalars("plane_dist");
 
     // Get centerline data.
-    auto centerline_points = centerline_polydata->GetPoints();
     int num_centerline_points = centerline_polydata->GetNumberOfPoints();
+    auto centerline_points = centerline_polydata->GetPoints();
     auto centerline_normals = vtkDoubleArray::SafeDownCast(
         centerline_polydata->GetPointData()->GetArray(
             "CenterlineSectionNormal"));
-    auto centerline_max_size = vtkDoubleArray::SafeDownCast(
-        centerline_polydata->GetPointData()->GetArray(
-            "MaximumInscribedSphereRadius"));
-
-    // Prepare area array
-    auto area = vtkSmartPointer<vtkDoubleArray>::New();
-    area->SetName("area");
-    area->SetNumberOfComponents(1);
-    area->SetNumberOfTuples(num_centerline_points);
-    centerline_polydata->GetPointData()->AddArray(area);
 
     // Prepare pressure and velocity arrays
     int num_point_arrays =
         result_unstructured_grid->GetPointData()->GetNumberOfArrays();
-    for (int ipoint = 0; ipoint < num_point_arrays; ipoint++)
+    for (int point_array_idx = 0; point_array_idx < num_point_arrays;
+         point_array_idx++)
     {
-        auto name = std::string(
-            result_unstructured_grid->GetPointData()->GetArrayName(ipoint));
+        auto name =
+            std::string(result_unstructured_grid->GetPointData()->GetArrayName(
+                point_array_idx));
         if (starts_with(name, "velocity") || starts_with(name, "pressure"))
         {
             auto array = vtkSmartPointer<vtkDoubleArray>::New();
@@ -434,19 +364,12 @@ int main(int argc, char *argv[])
         }
     }
 
-    // Extract centers of cells and build KdTree to search for cells in radius
-    auto cell_center_filter = vtkSmartPointer<vtkCellCenters>::New();
-    cell_center_filter->SetInputData(result_unstructured_grid);
-    cell_center_filter->Update();
-    auto cell_center_kdtree = vtkSmartPointer<vtkKdTree>::New();
-    cell_center_kdtree->BuildLocatorFromPoints(
-        cell_center_filter->GetOutput()->GetPoints());
-
     // Start parallel extraction
     std::cout << "Extract slices" << std::endl;
+    auto slice_start = std::chrono::high_resolution_clock::now();
     int num_slices_processed = 0;
 #pragma omp parallel for schedule(dynamic)
-    for (int i = 0; i < num_centerline_points; i++)
+    for (int i = 0; i < 20; i++)
     {
         // Extract thread information
         int my_slice;
@@ -462,7 +385,6 @@ int main(int argc, char *argv[])
         double maxsize1[1];
         centerline_points->GetPoint(i, position1);
         centerline_normals->GetTuple(i, normal1);
-        centerline_max_size->GetTuple(i, maxsize1);
 
         // Extract auxilliary second position for interpolation
         double normal2[3];
@@ -489,7 +411,6 @@ int main(int argc, char *argv[])
             position2[1] = position2a[1];
             position2[2] = position2a[2];
             centerline_normals->GetTuple(i + 1, normal2);
-            centerline_max_size->GetTuple(i + 1, maxsize2);
         }
         else
         {
@@ -497,15 +418,12 @@ int main(int argc, char *argv[])
             position2[1] = position2b[1];
             position2[2] = position2b[2];
             centerline_normals->GetTuple(i - 1, normal2);
-            centerline_max_size->GetTuple(i - 1, maxsize2);
         }
 
-        // Setup position and slice
+        // Setup slice
         vtkSmartPointer<vtkPolyData> slice;
-        vtkSmartPointer<vtkUnstructuredGrid> my_grid;
         double position[3];
         double normal[3];
-        double srad;
 
         // Start slice extraction routine
         float weight = 0.01;
@@ -524,48 +442,23 @@ int main(int argc, char *argv[])
             {
                 normal[j] = normal[j] / nnorm;
             }
-            srad = (maxsize1[0] * (1.0 - weight) + maxsize2[0] * weight) * 1.5;
 
-            // Find cells of interest by searching in radius around position
-            auto selected_cells = vtkSmartPointer<vtkIdList>::New();
-            cell_center_kdtree->FindPointsWithinRadius(srad, position,
-                                                       selected_cells);
-            auto cell_extractor = vtkSmartPointer<vtkExtractCells>::New();
-            cell_extractor->SetInputData(result_unstructured_grid);
-            cell_extractor->SetCellList(selected_cells);
-            cell_extractor->Update();
-            my_grid = cell_extractor->GetOutput();
+            auto plane = vtkSmartPointer<vtkPlane>::New();
+            plane->SetOrigin(position);
+            plane->SetNormal(normal);
 
-            // Compute distance of each mesh point from the slicing plane.
-            for (int iter1 = 0; iter1 < my_grid->GetNumberOfPoints(); iter1++)
-            {
-                double pt[3];
-                my_grid->GetPoints()->GetPoint(iter1, pt);
-                double d[1];
-                d[0] = normal[0] * (pt[0] - position[0]) +
-                       normal[1] * (pt[1] - position[1]) +
-                       normal[2] * (pt[2] - position[2]);
-                my_grid->GetPointData()
-                    ->GetArray("plane_dist")
-                    ->SetTuple(iter1, d);
-            }
-
-            // Set the scalar field used to extract a slice.
-            my_grid->GetPointData()->SetActiveScalars("plane_dist");
-
-            // Extract slice with contour filter where distance to plane is zero
-            auto contour = vtkSmartPointer<vtkContourGrid>::New();
-            contour->SetInputData(my_grid);
-            contour->SetValue(0, 0.0);
-            contour->ComputeNormalsOff();
-            contour->Update();
-            slice = contour->GetOutput();
+            auto cutter = vtkSmartPointer<vtkCutter>::New();
+            cutter->SetCutFunction(plane);
+            cutter->SetInputData(result_unstructured_grid);
+            cutter->Update();
+            slice = cutter->GetOutput();
 
             // Break if extracted slice is not emtpy
             if (slice->GetNumberOfPoints())
             {
                 break;
             }
+            std::cout << "Slice was emtpy." << std::endl;
 
             // Raise runtime error if no slice found after 5 iterations
             if (weight == 0.6)
@@ -581,21 +474,19 @@ int main(int argc, char *argv[])
         vtkIdType num_point_arrays_slice =
             slice->GetPointData()->GetNumberOfArrays();
         int num_points_slice = slice->GetNumberOfPoints();
-        int numcells = slice->GetPolys()->GetNumberOfCells();
 
         // Calculate area of slice and of all cells in slice
         std::vector<double> area_of_cells_in_slice;
-        double area_i[1];
-        area_i[0] = compute_slice_area(slice, area_of_cells_in_slice);
-        centerline_polydata->GetPointData()->GetArray("area")->SetTuple(i,
-                                                                        area_i);
-        double area_inv = 1.0 / area_i[0];
+        double slice_area;
+        slice_area = compute_slice_area(slice, area_of_cells_in_slice);
+        double slice_area_inv = 1.0 / slice_area;
 
         // Iterate over point data arrays and integrate over slice
-        for (int ipoint = 0; ipoint < num_point_arrays_slice; ipoint++)
+        for (int point_array_idx = 0; point_array_idx < num_point_arrays_slice;
+             point_array_idx++)
         {
-            auto name =
-                std::string(slice->GetPointData()->GetArrayName(ipoint));
+            auto name = std::string(
+                slice->GetPointData()->GetArrayName(point_array_idx));
 
             // Integrate velocity profile
             if (starts_with(name, "velocity"))
@@ -604,9 +495,10 @@ int main(int argc, char *argv[])
                 double flux[num_points_slice];
                 for (int j = 0; j < num_points_slice; j++)
                 {
-                    double *vel =
-                        slice->GetPointData()->GetArray(ipoint)->GetTuple3(j);
-                    double curflux = 0;
+                    double *vel = slice->GetPointData()
+                                      ->GetArray(point_array_idx)
+                                      ->GetTuple3(j);
+                    double curflux = 0.0;
                     for (int k = 0; k < 3; k++)
                     {
                         curflux += vel[k] * normal[k];
@@ -629,13 +521,14 @@ int main(int argc, char *argv[])
             {
                 // Integrate pressure over slice area
                 double result[1];
-                result[0] = integrate_on_slice(slice, area_of_cells_in_slice,
-                                               [&](vtkIdType index) -> double {
-                                                   return slice->GetPointData()
-                                                       ->GetArray(ipoint)
-                                                       ->GetTuple1(index);
-                                               });
-                result[0] *= area_inv;
+                result[0] =
+                    integrate_on_slice(slice, area_of_cells_in_slice,
+                                       [&](vtkIdType index) -> double {
+                                           return slice->GetPointData()
+                                               ->GetArray(point_array_idx)
+                                               ->GetTuple1(index);
+                                       });
+                result[0] *= slice_area_inv;
                 centerline_polydata->GetPointData()
                     ->GetArray(name.c_str())
                     ->SetTuple(i, result);
@@ -644,10 +537,22 @@ int main(int argc, char *argv[])
         std::cout << "Completed slice " << my_slice << "/"
                   << num_centerline_points << std::endl;
     }
+    auto slice_stop = std::chrono::high_resolution_clock::now();
+
+    std::string output_file_name = argv[3];
+    std::cout << "Writing output file '" << output_file_name << "'"
+              << std::endl;
+    vtkSmartPointer<vtkXMLPolyDataWriter> writer =
+        vtkSmartPointer<vtkXMLPolyDataWriter>::New();
+    writer->SetFileName(output_file_name.c_str());
+    writer->SetInputData(centerline_polydata);
+    writer->Update();
+    writer->Write();
 
     auto stop = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double> duration = stop - start;
+    std::chrono::duration<double> duration_sice = slice_stop - slice_start;
     std::cout << "Slice extraction completed in " << duration.count() << " s ("
-              << duration.count() / num_slices_processed << " s per slice)"
+              << duration_sice.count() / num_centerline_points << " s per slice)"
               << std::endl;
 }
