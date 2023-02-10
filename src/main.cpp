@@ -369,7 +369,7 @@ int main(int argc, char *argv[])
     auto slice_start = std::chrono::high_resolution_clock::now();
     int num_slices_processed = 0;
 #pragma omp parallel for schedule(dynamic)
-    for (int i = 0; i < 20; i++)
+    for (int i = 0; i < num_centerline_points; i++)
     {
         // Extract thread information
         int my_slice;
