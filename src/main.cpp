@@ -553,6 +553,6 @@ int main(int argc, char *argv[])
     std::chrono::duration<double> duration = stop - start;
     std::chrono::duration<double> duration_sice = slice_stop - slice_start;
     std::cout << "Slice extraction completed in " << duration.count() << " s ("
-              << duration_sice.count() / num_centerline_points << " s per slice)"
-              << std::endl;
+              << duration_sice.count() / num_centerline_points
+              << " s per slice)" << std::endl;
 }
