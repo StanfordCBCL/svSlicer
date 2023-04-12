@@ -426,7 +426,7 @@ int main(int argc, char *argv[])
         double normal[3];
 
         // Start slice extraction routine
-        float weight = 0.01;
+        float weight = 0.1;
         while (true)
         {
             // Determine interpolated position, normal and max_size
@@ -452,6 +452,9 @@ int main(int argc, char *argv[])
             cutter->SetInputData(result_unstructured_grid);
             cutter->Update();
             slice = cutter->GetOutput();
+
+	    //Update weight
+	    weight = weight + 0.1;
 
             // Break if extracted slice is not emtpy
             if (slice->GetNumberOfPoints())
