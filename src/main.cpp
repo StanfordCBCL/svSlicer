@@ -426,7 +426,7 @@ int main(int argc, char *argv[])
         double normal[3];
 
         // Start slice extraction routine
-        float weight = 0.1;
+        float weight = 0.0;
         while (true)
         {
             // Determine interpolated position, normal and max_size
@@ -454,7 +454,7 @@ int main(int argc, char *argv[])
             slice = cutter->GetOutput();
 
 	    //Update weight
-	    weight = weight + 0.1;
+	    weight += 0.1;
 
             // Break if extracted slice is not emtpy
             if (slice->GetNumberOfPoints())
@@ -464,7 +464,7 @@ int main(int argc, char *argv[])
             std::cout << "Slice was emtpy." << std::endl;
 
             // Raise runtime error if no slice found after 5 iterations
-            if (weight == 0.6)
+            if (weight >= 0.6)
             {
                 throw std::runtime_error("Interpolation failed.");
             }
