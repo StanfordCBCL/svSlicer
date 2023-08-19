@@ -29,7 +29,7 @@ jobs:
     steps:
       - uses: actions/checkout@v2
       - name: Install macOS dependencies
-        run: brew install vtk
+        run: brew install vtk llvm
       - name: Build svZeroDSolver
         run: |
           mkdir Release
