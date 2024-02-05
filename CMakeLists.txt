@@ -12,7 +12,7 @@ else()
     set(CMAKE_CXX_FLAGS "-fopenmp")
 endif()
 
-find_package(VTK REQUIRED)
+find_package(VTK COMPONENTS IOXML FiltersCore REQUIRED)
 include_directories(${VTK_INCLUDE_DIRS})
 
 add_executable(svslicer src/main.cpp)
