@@ -42,7 +42,8 @@ cmake --build .
 cmake --install .
 ```
 
-> For macOS, LLVM is required. It can be installed using `brew install llvm`.
+> For macOS, the OpenMP runtime is required. It can be installed using
+> `brew install libomp` (the build picks it up automatically via Homebrew).
 
 ## Run
 

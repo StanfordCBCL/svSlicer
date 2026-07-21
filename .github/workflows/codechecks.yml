@@ -5,10 +5,10 @@ jobs:
   clang-format:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
       - name: Install dependencies
         run: |
-          sudo apt install clang-format
+          sudo apt update && sudo apt install -y clang-format
       - name: Run clang-format
         run: |
           clang-format --dry-run --style=file:.clang_format --Werror src/main.cpp

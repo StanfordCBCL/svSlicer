@@ -1,6 +1,4 @@
-# This workflow builds and tests svZeroDSolver. The Python version is tested on
-# ubuntu and the C++ version is built and tested on different versions of
-# ubuntu and macOS.
+# This workflow builds svSlicer. The C++ version is built on Ubuntu and macOS.
 name: Buildtest
 on: [push, pull_request]
 jobs:
@@ -8,13 +6,13 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-22.04]
+        os: [ubuntu-22.04, ubuntu-24.04]
       fail-fast: false
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
       - name: Install ubuntu dependencies
-        run: sudo apt update && sudo apt install build-essential cmake libgl1-mesa-dev libvtk9-dev qtbase5-dev
-      - name: Build svZeroDSolver
+        run: sudo apt update && sudo apt install -y build-essential cmake libgl1-mesa-dev libvtk9-dev qtbase5-dev
+      - name: Build svSlicer
         run: |
           mkdir Release
           cd Release
@@ -24,16 +22,15 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [macos-11, macos-12]
+        os: [macos-13, macos-14]
       fail-fast: false
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
       - name: Install macOS dependencies
-        run: brew install vtk llvm
-      - name: Build svZeroDSolver
+        run: brew install vtk libomp
+      - name: Build svSlicer
         run: |
           mkdir Release
           cd Release
           cmake -DCMAKE_BUILD_TYPE=Release ..
           cmake --build .
-  

@@ -17,11 +17,16 @@
 #include <vtkXMLPolyDataWriter.h>
 #include <vtkXMLUnstructuredGridReader.h>
 
+#include <chrono>
+#include <cmath>
 #include <filesystem>
+#include <functional>
 #include <iostream>
+#include <limits>
 #include <set>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 /**
  * @brief Check if given string starts with a certain prefix
@@ -31,7 +36,7 @@
  * @return true If string starts with the prefix
  * @return false If string does not start with the prefix
  */
-bool starts_with(std::string &string, std::string prefix)
+bool starts_with(std::string& string, std::string prefix)
 {
     if (string.find(prefix) == 0)
         return true;
@@ -90,7 +95,7 @@ void clean_up_point_data(vtkSmartPointer<T> data_pointer,
     }
 
     // Delete all data arrays marked for removal
-    for (auto const &name : remove_array_names)
+    for (auto const& name : remove_array_names)
     {
         data_pointer->GetPointData()->RemoveArray(name.c_str());
     }
@@ -147,7 +152,7 @@ void clean_up_cell_data(vtkSmartPointer<T> data_pointer,
     }
 
     // Delete all data arrays marked for removal
-    for (auto const &name : remove_array_names)
+    for (auto const& name : remove_array_names)
     {
         data_pointer->GetCellData()->RemoveArray(name.c_str());
     }
@@ -192,7 +197,7 @@ vtkSmartPointer<vtkPolyData> get_clean_slice(double position[3],
  * @return double The total area of the slice.
  */
 double compute_slice_area(vtkSmartPointer<vtkPolyData> slice,
-                          std::vector<double> &area_of_cells_in_slice)
+                          std::vector<double>& area_of_cells_in_slice)
 {
     auto polys = slice->GetPolys();
     double total_area = 0.0;
@@ -204,7 +209,7 @@ double compute_slice_area(vtkSmartPointer<vtkPolyData> slice,
     {
         // Extract points of the
         vtkIdType cell_size;
-        const vtkIdType *cell_points;
+        const vtkIdType* cell_points;
         polys->GetCellAtId(icell, cell_size, cell_points);
 
         // From now on, we assume that the elements are triangles (true for
@@ -239,7 +244,7 @@ double compute_slice_area(vtkSmartPointer<vtkPolyData> slice,
  * @return double The integrated quantity
  */
 double integrate_on_slice(vtkSmartPointer<vtkPolyData> slice,
-                          std::vector<double> &area_of_cells_in_slice,
+                          std::vector<double>& area_of_cells_in_slice,
                           std::function<double(vtkIdType)> fun)
 {
     // Sum of the integrated quantity of interest for each cell
@@ -250,7 +255,7 @@ double integrate_on_slice(vtkSmartPointer<vtkPolyData> slice,
     {
         // Extract the points belonging to the selected cell
         vtkIdType cell_size;
-        const vtkIdType *cell_points;
+        const vtkIdType* cell_points;
         slice->GetPolys()->GetCellAtId(j, cell_size, cell_points);
 
         // Determine mean of quantity of all cell points
@@ -273,11 +278,11 @@ double integrate_on_slice(vtkSmartPointer<vtkPolyData> slice,
  * @param argv Command line arguments passed to svSlicer
  * @return int
  */
-int main(int argc, char *argv[])
+int main(int argc, char* argv[])
 {
     auto start = std::chrono::high_resolution_clock::now();
 
-    if (argc < 3)
+    if (argc < 4)
     {
         std::cerr
             << "Usage: svslicer [RESULT_FILE] [CENTERLINE_FILE] [OUTPUT_FILE]"
@@ -382,42 +387,62 @@ int main(int argc, char *argv[])
         // Extract current position
         double position1[3];
         double normal1[3];
-        double maxsize1[1];
         centerline_points->GetPoint(i, position1);
         centerline_normals->GetTuple(i, normal1);
 
-        // Extract auxilliary second position for interpolation
+        // Extract auxilliary second position for interpolation. The neighbor
+        // that is closest to the current point is used. Guard against the
+        // first/last centerline point, which only has a single neighbor.
         double normal2[3];
-        double maxsize2[0];
         double position2[3];
         double position2a[3];
         double position2b[3];
-        centerline_points->GetPoint(i + 1, position2a);
-        centerline_points->GetPoint(i - 1, position2b);
+        bool has_next = (i + 1) < num_centerline_points;
+        bool has_prev = (i - 1) >= 0;
 
-        double quaddista = 0.0;
-        double quaddistb = 0.0;
-        for (int j = 0; j < 3; j++)
+        double quaddista = std::numeric_limits<double>::max();
+        double quaddistb = std::numeric_limits<double>::max();
+        if (has_next)
         {
-            quaddista +=
-                (position1[j] - position2a[j]) * (position1[j] - position2a[j]);
-            quaddistb +=
-                (position1[j] - position2b[j]) * (position1[j] - position2b[j]);
+            centerline_points->GetPoint(i + 1, position2a);
+            quaddista = 0.0;
+            for (int j = 0; j < 3; j++)
+                quaddista += (position1[j] - position2a[j]) *
+                             (position1[j] - position2a[j]);
+        }
+        if (has_prev)
+        {
+            centerline_points->GetPoint(i - 1, position2b);
+            quaddistb = 0.0;
+            for (int j = 0; j < 3; j++)
+                quaddistb += (position1[j] - position2b[j]) *
+                             (position1[j] - position2b[j]);
         }
 
-        if (quaddista < quaddistb)
+        if (has_next && quaddista <= quaddistb)
         {
             position2[0] = position2a[0];
             position2[1] = position2a[1];
             position2[2] = position2a[2];
             centerline_normals->GetTuple(i + 1, normal2);
         }
-        else
+        else if (has_prev)
         {
             position2[0] = position2b[0];
             position2[1] = position2b[1];
             position2[2] = position2b[2];
             centerline_normals->GetTuple(i - 1, normal2);
+        }
+        else
+        {
+            // Degenerate single-point centerline: no neighbor to interpolate
+            // towards, so fall back to the point itself.
+            position2[0] = position1[0];
+            position2[1] = position1[1];
+            position2[2] = position1[2];
+            normal2[0] = normal1[0];
+            normal2[1] = normal1[1];
+            normal2[2] = normal1[2];
         }
 
         // Setup slice
@@ -438,6 +463,7 @@ int main(int argc, char *argv[])
                 normal[j] = normal1[j] * (1.0 - weight) + normal2[j] * weight;
                 nnorm += normal[j] * normal[j];
             }
+            nnorm = std::sqrt(nnorm);
             for (int j = 0; j < 3; j++)
             {
                 normal[j] = normal[j] / nnorm;
@@ -495,10 +521,10 @@ int main(int argc, char *argv[])
             if (starts_with(name, "velocity"))
             {
                 // Calculate flux (flow in normal direction)
-                double flux[num_points_slice];
+                std::vector<double> flux(num_points_slice);
                 for (int j = 0; j < num_points_slice; j++)
                 {
-                    double *vel = slice->GetPointData()
+                    double* vel = slice->GetPointData()
                                       ->GetArray(point_array_idx)
                                       ->GetTuple3(j);
                     double curflux = 0.0;
@@ -526,7 +552,8 @@ int main(int argc, char *argv[])
                 double result[1];
                 result[0] =
                     integrate_on_slice(slice, area_of_cells_in_slice,
-                                       [&](vtkIdType index) -> double {
+                                       [&](vtkIdType index) -> double
+                                       {
                                            return slice->GetPointData()
                                                ->GetArray(point_array_idx)
                                                ->GetTuple1(index);
