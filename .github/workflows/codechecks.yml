@@ -6,9 +6,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Install dependencies
-        run: |
-          sudo apt update && sudo apt install -y clang-format
+      # Pin clang-format to a fixed version so formatting is reproducible and
+      # does not drift when the runner image bumps its default clang-format.
+      - name: Install clang-format
+        run: pipx install clang-format==20.1.7
       - name: Run clang-format
         run: |
           clang-format --dry-run --style=file:.clang_format --Werror src/main.cpp
