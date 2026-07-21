@@ -3,11 +3,7 @@ name: Buildtest
 on: [push, pull_request]
 jobs:
   build-ubuntu:
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [ubuntu-22.04, ubuntu-24.04]
-      fail-fast: false
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - name: Install ubuntu dependencies
@@ -19,11 +15,7 @@ jobs:
           cmake -DCMAKE_BUILD_TYPE=Release ..
           cmake --build .
   build-macos:
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [macos-13, macos-14]
-      fail-fast: false
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
       - name: Install macOS dependencies
