@@ -16,7 +16,7 @@ https://github.com/lucapegolotti/cardiovascular/tree/master/slice-vtu-results-ce
 ### Dependencies
 
 VTK is required for svSlicer. You can either install it with a package
-manager (e.g. `brew install vtk` on macOS, `apt install libvtk9-dev` on Ubuntu) or build it using:
+manager (e.g. `brew install vtk` on macOS, `apt install libvtk9-dev` on Debian) or build it using:
 
 ```
 mkdir -p ./vtk/src
@@ -45,11 +45,43 @@ cmake --install .
 > For macOS, the OpenMP runtime is required. It can be installed using
 > `brew install libomp` (the build picks it up automatically via Homebrew).
 
+> The `libvtk9-dev` package of Ubuntu 24.04 cannot read VTK XML files with raw
+> appended data since a libexpat security update
+> ([Launchpad bug 2058415](https://bugs.launchpad.net/ubuntu/+source/paraview/+bug/2058415)).
+> Use Debian's `libvtk9-dev` (bookworm or later), Homebrew, or a VTK built from
+> source instead.
+
 ## Run
 
 ```bash
 OMP_NUM_THREADS=<NUM_THREADS> svslicer <path/to/3d_result.vtu> <path/to/centerline.vtp> <path/to/output_file.vtp>
 ```
+
+Velocity point arrays (names starting with `velocity`, ignoring case) must
+have at least three components; arrays with fewer components cause an error.
+When an array has more than three components, the first three are used.
+
+Each participating OpenMP thread slices its own copy of the 3D result, so
+memory use grows by about one result mesh per additional thread. The thread
+count is capped by the number of centerline points, and grid copies are
+allocated only for the team actually created by OpenMP.
+
+## Test
+
+After building, run the regression test from the build directory:
+
+```bash
+ctest --output-on-failure
+```
+
+It generates a synthetic tube with linear velocity and pressure fields, runs
+svSlicer single-threaded and five times with 8 threads, and checks that every
+output matches the analytic flow and pressure and agrees with the
+single-threaded output to 1e-12 relative. Additional checks cover invalid velocity component
+counts, four-component velocities, single-point centerlines, and OpenMP thread
+limits. Use `-DSVSLICER_TEST_THREADS=<n>` and
+`-DSVSLICER_TEST_REPEATS=<n>` to change the thread count and repeats, or
+`-DSVSLICER_BUILD_TESTS=OFF` to skip building the test.
 
 ## Estimated runtime
 
@@ -75,7 +107,7 @@ version locally to avoid formatting differences between clang-format releases.
 Apply the right format to your code changes with:
 
 ```
-clang-format -i --style=file:.clang_format src/main.cpp
+clang-format -i --style=file:.clang_format src/main.cpp tests/*.cpp
 ```
 
 This format is also enforced for pull requests to be allowed.

@@ -12,4 +12,4 @@ jobs:
         run: pipx install clang-format==20.1.7
       - name: Run clang-format
         run: |
-          clang-format --dry-run --style=file:.clang_format --Werror src/main.cpp
+          clang-format --dry-run --style=file:.clang_format --Werror src/main.cpp tests/*.cpp
