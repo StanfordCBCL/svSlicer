@@ -17,6 +17,7 @@
 #include <vtkXMLPolyDataWriter.h>
 #include <vtkXMLUnstructuredGridReader.h>
 
+#include <atomic>
 #include <chrono>
 #include <cmath>
 #include <filesystem>
@@ -369,6 +370,23 @@ int main(int argc, char* argv[])
         }
     }
 
+    // Give each thread its own shallow copy of the result grid. vtkCutter
+    // lazily builds caches on its input (e.g. the distinct cell types), which
+    // is not thread-safe on one shared grid. The copies share the arrays and
+    // are made here, before the parallel loop, so no thread touches another's.
+    std::vector<vtkSmartPointer<vtkUnstructuredGrid>> thread_grids(
+        omp_get_max_threads());
+    for (auto& grid : thread_grids)
+    {
+        grid = vtkSmartPointer<vtkUnstructuredGrid>::New();
+        grid->ShallowCopy(result_unstructured_grid);
+    }
+
+    // An exception cannot leave an OpenMP loop, so the first one is kept and
+    // reported after it, and the remaining slices are skipped.
+    std::atomic<bool> failed(false);
+    std::string error_message;
+
     // Start parallel extraction
     std::cout << "Extract slices" << std::endl;
     auto slice_start = std::chrono::high_resolution_clock::now();
@@ -376,198 +394,221 @@ int main(int argc, char* argv[])
 #pragma omp parallel for schedule(dynamic)
     for (int i = 0; i < num_centerline_points; i++)
     {
-        // Extract thread information
-        int my_slice;
+        if (failed) continue;
+        try
+        {
+            // Extract thread information
+            int my_slice;
 #pragma omp critical(status)
-        {
-            num_slices_processed++;
-            my_slice = num_slices_processed;
-        }
-
-        // Extract current position
-        double position1[3];
-        double normal1[3];
-        centerline_points->GetPoint(i, position1);
-        centerline_normals->GetTuple(i, normal1);
-
-        // Extract auxilliary second position for interpolation. The neighbor
-        // that is closest to the current point is used. Guard against the
-        // first/last centerline point, which only has a single neighbor.
-        double normal2[3];
-        double position2[3];
-        double position2a[3];
-        double position2b[3];
-        bool has_next = (i + 1) < num_centerline_points;
-        bool has_prev = (i - 1) >= 0;
-
-        double quaddista = std::numeric_limits<double>::max();
-        double quaddistb = std::numeric_limits<double>::max();
-        if (has_next)
-        {
-            centerline_points->GetPoint(i + 1, position2a);
-            quaddista = 0.0;
-            for (int j = 0; j < 3; j++)
-                quaddista += (position1[j] - position2a[j]) *
-                             (position1[j] - position2a[j]);
-        }
-        if (has_prev)
-        {
-            centerline_points->GetPoint(i - 1, position2b);
-            quaddistb = 0.0;
-            for (int j = 0; j < 3; j++)
-                quaddistb += (position1[j] - position2b[j]) *
-                             (position1[j] - position2b[j]);
-        }
-
-        if (has_next && quaddista <= quaddistb)
-        {
-            position2[0] = position2a[0];
-            position2[1] = position2a[1];
-            position2[2] = position2a[2];
-            centerline_normals->GetTuple(i + 1, normal2);
-        }
-        else if (has_prev)
-        {
-            position2[0] = position2b[0];
-            position2[1] = position2b[1];
-            position2[2] = position2b[2];
-            centerline_normals->GetTuple(i - 1, normal2);
-        }
-        else
-        {
-            // Degenerate single-point centerline: no neighbor to interpolate
-            // towards, so fall back to the point itself.
-            position2[0] = position1[0];
-            position2[1] = position1[1];
-            position2[2] = position1[2];
-            normal2[0] = normal1[0];
-            normal2[1] = normal1[1];
-            normal2[2] = normal1[2];
-        }
-
-        // Setup slice
-        vtkSmartPointer<vtkPolyData> slice;
-        double position[3];
-        double normal[3];
-
-        // Start slice extraction routine
-        float weight = 0.0;
-        while (true)
-        {
-            // Determine interpolated position, normal and max_size
-            double nnorm = 0.0;
-            for (int j = 0; j < 3; j++)
             {
-                position[j] =
-                    position1[j] * (1.0 - weight) + position2[j] * weight;
-                normal[j] = normal1[j] * (1.0 - weight) + normal2[j] * weight;
-                nnorm += normal[j] * normal[j];
-            }
-            nnorm = std::sqrt(nnorm);
-            for (int j = 0; j < 3; j++)
-            {
-                normal[j] = normal[j] / nnorm;
+                num_slices_processed++;
+                my_slice = num_slices_processed;
             }
 
-            auto plane = vtkSmartPointer<vtkPlane>::New();
-            plane->SetOrigin(position);
-            plane->SetNormal(normal);
+            // Extract current position
+            double position1[3];
+            double normal1[3];
+            centerline_points->GetPoint(i, position1);
+            centerline_normals->GetTuple(i, normal1);
 
-            auto cutter = vtkSmartPointer<vtkCutter>::New();
-            cutter->SetCutFunction(plane);
-            cutter->SetInputData(result_unstructured_grid);
-            cutter->Update();
-            slice = cutter->GetOutput();
+            // Extract auxilliary second position for interpolation. The
+            // neighbor that is closest to the current point is used. Guard
+            // against the first/last centerline point, which only has a single
+            // neighbor.
+            double normal2[3];
+            double position2[3];
+            double position2a[3];
+            double position2b[3];
+            bool has_next = (i + 1) < num_centerline_points;
+            bool has_prev = (i - 1) >= 0;
 
-            // Update weight
-            weight += 0.1;
-
-            // Break if extracted slice is not emtpy
-            if (slice->GetNumberOfPoints())
+            double quaddista = std::numeric_limits<double>::max();
+            double quaddistb = std::numeric_limits<double>::max();
+            if (has_next)
             {
-                break;
+                centerline_points->GetPoint(i + 1, position2a);
+                quaddista = 0.0;
+                for (int j = 0; j < 3; j++)
+                    quaddista += (position1[j] - position2a[j]) *
+                                 (position1[j] - position2a[j]);
             }
-            std::cout << "Slice was emtpy." << std::endl;
-
-            // Raise runtime error if no slice found after 5 iterations
-            if (weight >= 0.6)
+            if (has_prev)
             {
-                throw std::runtime_error("Interpolation failed.");
+                centerline_points->GetPoint(i - 1, position2b);
+                quaddistb = 0.0;
+                for (int j = 0; j < 3; j++)
+                    quaddistb += (position1[j] - position2b[j]) *
+                                 (position1[j] - position2b[j]);
             }
-        }
 
-        // Clean up the slice
-        slice = get_clean_slice(position, slice);
-
-        // Extract slice data
-        vtkIdType num_point_arrays_slice =
-            slice->GetPointData()->GetNumberOfArrays();
-        int num_points_slice = slice->GetNumberOfPoints();
-
-        // Calculate area of slice and of all cells in slice
-        std::vector<double> area_of_cells_in_slice;
-        double slice_area;
-        slice_area = compute_slice_area(slice, area_of_cells_in_slice);
-        double slice_area_inv = 1.0 / slice_area;
-
-        // Iterate over point data arrays and integrate over slice
-        for (int point_array_idx = 0; point_array_idx < num_point_arrays_slice;
-             point_array_idx++)
-        {
-            auto name = std::string(
-                slice->GetPointData()->GetArrayName(point_array_idx));
-
-            // Integrate velocity profile
-            if (starts_with(name, "velocity"))
+            if (has_next && quaddista <= quaddistb)
             {
-                // Calculate flux (flow in normal direction)
-                std::vector<double> flux(num_points_slice);
-                for (int j = 0; j < num_points_slice; j++)
+                position2[0] = position2a[0];
+                position2[1] = position2a[1];
+                position2[2] = position2a[2];
+                centerline_normals->GetTuple(i + 1, normal2);
+            }
+            else if (has_prev)
+            {
+                position2[0] = position2b[0];
+                position2[1] = position2b[1];
+                position2[2] = position2b[2];
+                centerline_normals->GetTuple(i - 1, normal2);
+            }
+            else
+            {
+                // Degenerate single-point centerline: no neighbor to
+                // interpolate towards, so fall back to the point itself.
+                position2[0] = position1[0];
+                position2[1] = position1[1];
+                position2[2] = position1[2];
+                normal2[0] = normal1[0];
+                normal2[1] = normal1[1];
+                normal2[2] = normal1[2];
+            }
+
+            // Setup slice
+            vtkSmartPointer<vtkPolyData> slice;
+            double position[3];
+            double normal[3];
+
+            // Start slice extraction routine
+            float weight = 0.0;
+            while (true)
+            {
+                // Determine interpolated position, normal and max_size
+                double nnorm = 0.0;
+                for (int j = 0; j < 3; j++)
                 {
-                    double* vel = slice->GetPointData()
-                                      ->GetArray(point_array_idx)
-                                      ->GetTuple3(j);
-                    double curflux = 0.0;
-                    for (int k = 0; k < 3; k++)
-                    {
-                        curflux += vel[k] * normal[k];
-                    }
-                    flux[j] = curflux;
+                    position[j] =
+                        position1[j] * (1.0 - weight) + position2[j] * weight;
+                    normal[j] =
+                        normal1[j] * (1.0 - weight) + normal2[j] * weight;
+                    nnorm += normal[j] * normal[j];
+                }
+                nnorm = std::sqrt(nnorm);
+                for (int j = 0; j < 3; j++)
+                {
+                    normal[j] = normal[j] / nnorm;
                 }
 
-                // Integrate flux over slice
-                double result[1];
-                result[0] = integrate_on_slice(slice, area_of_cells_in_slice,
-                                               [&](vtkIdType index) -> double
-                                               { return flux[index]; });
-                centerline_polydata->GetPointData()
-                    ->GetArray(name.c_str())
-                    ->SetTuple(i, result);
+                auto plane = vtkSmartPointer<vtkPlane>::New();
+                plane->SetOrigin(position);
+                plane->SetNormal(normal);
+
+                auto cutter = vtkSmartPointer<vtkCutter>::New();
+                cutter->SetCutFunction(plane);
+                cutter->SetInputData(thread_grids[omp_get_thread_num()]);
+                cutter->Update();
+                slice = cutter->GetOutput();
+
+                // Update weight
+                weight += 0.1;
+
+                // Break if extracted slice is not emtpy
+                if (slice->GetNumberOfPoints())
+                {
+                    break;
+                }
+                std::cout << "Slice was emtpy." << std::endl;
+
+                // Raise runtime error if no slice found after 5 iterations
+                if (weight >= 0.6)
+                {
+                    throw std::runtime_error("Interpolation failed.");
+                }
             }
 
-            // Integrate pressure
-            if (starts_with(name, "pressure"))
+            // Clean up the slice
+            slice = get_clean_slice(position, slice);
+
+            // Extract slice data
+            vtkIdType num_point_arrays_slice =
+                slice->GetPointData()->GetNumberOfArrays();
+            int num_points_slice = slice->GetNumberOfPoints();
+
+            // Calculate area of slice and of all cells in slice
+            std::vector<double> area_of_cells_in_slice;
+            double slice_area;
+            slice_area = compute_slice_area(slice, area_of_cells_in_slice);
+            double slice_area_inv = 1.0 / slice_area;
+
+            // Iterate over point data arrays and integrate over slice
+            for (int point_array_idx = 0;
+                 point_array_idx < num_point_arrays_slice; point_array_idx++)
             {
-                // Integrate pressure over slice area
-                double result[1];
-                result[0] =
-                    integrate_on_slice(slice, area_of_cells_in_slice,
-                                       [&](vtkIdType index) -> double
-                                       {
-                                           return slice->GetPointData()
-                                               ->GetArray(point_array_idx)
-                                               ->GetTuple1(index);
-                                       });
-                result[0] *= slice_area_inv;
-                centerline_polydata->GetPointData()
-                    ->GetArray(name.c_str())
-                    ->SetTuple(i, result);
+                auto name = std::string(
+                    slice->GetPointData()->GetArrayName(point_array_idx));
+
+                // Integrate velocity profile
+                if (starts_with(name, "velocity"))
+                {
+                    // Calculate flux (flow in normal direction)
+                    std::vector<double> flux(num_points_slice);
+                    for (int j = 0; j < num_points_slice; j++)
+                    {
+                        double* vel = slice->GetPointData()
+                                          ->GetArray(point_array_idx)
+                                          ->GetTuple3(j);
+                        double curflux = 0.0;
+                        for (int k = 0; k < 3; k++)
+                        {
+                            curflux += vel[k] * normal[k];
+                        }
+                        flux[j] = curflux;
+                    }
+
+                    // Integrate flux over slice
+                    double result[1];
+                    result[0] = integrate_on_slice(
+                        slice, area_of_cells_in_slice,
+                        [&](vtkIdType index) -> double { return flux[index]; });
+                    centerline_polydata->GetPointData()
+                        ->GetArray(name.c_str())
+                        ->SetTuple(i, result);
+                }
+
+                // Integrate pressure
+                if (starts_with(name, "pressure"))
+                {
+                    // Integrate pressure over slice area
+                    double result[1];
+                    result[0] =
+                        integrate_on_slice(slice, area_of_cells_in_slice,
+                                           [&](vtkIdType index) -> double
+                                           {
+                                               return slice->GetPointData()
+                                                   ->GetArray(point_array_idx)
+                                                   ->GetTuple1(index);
+                                           });
+                    result[0] *= slice_area_inv;
+                    centerline_polydata->GetPointData()
+                        ->GetArray(name.c_str())
+                        ->SetTuple(i, result);
+                }
+            }
+            std::cout << "Completed slice " << my_slice << "/"
+                      << num_centerline_points << std::endl;
+        }
+        catch (const std::exception& e)
+        {
+#pragma omp critical(error)
+            {
+                if (!failed)
+                {
+                    error_message = "Slice at centerline point " +
+                                    std::to_string(i) + ": " + e.what();
+                    failed = true;
+                }
             }
         }
-        std::cout << "Completed slice " << my_slice << "/"
-                  << num_centerline_points << std::endl;
     }
     auto slice_stop = std::chrono::high_resolution_clock::now();
+    if (failed)
+    {
+        std::cerr << "ERROR: " << error_message << std::endl;
+        return EXIT_FAILURE;
+    }
 
     std::string output_file_name = argv[3];
     std::cout << "Writing output file '" << output_file_name << "'"
