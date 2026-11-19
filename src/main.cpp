@@ -386,6 +386,18 @@ int main(int argc, char* argv[])
     // reported after it, and the remaining slices are skipped.
     std::atomic<bool> failed(false);
     std::string error_message;
+    auto record_error = [&](int i, const std::string& what)
+    {
+#pragma omp critical(error)
+        {
+            if (!failed)
+            {
+                error_message = "Slice at centerline point " +
+                                std::to_string(i) + ": " + what;
+                failed = true;
+            }
+        }
+    };
 
     // Start parallel extraction
     std::cout << "Extract slices" << std::endl;
@@ -592,15 +604,11 @@ int main(int argc, char* argv[])
         }
         catch (const std::exception& e)
         {
-#pragma omp critical(error)
-            {
-                if (!failed)
-                {
-                    error_message = "Slice at centerline point " +
-                                    std::to_string(i) + ": " + e.what();
-                    failed = true;
-                }
-            }
+            record_error(i, e.what());
+        }
+        catch (...)
+        {
+            record_error(i, "unknown error");
         }
     }
     auto slice_stop = std::chrono::high_resolution_clock::now();
