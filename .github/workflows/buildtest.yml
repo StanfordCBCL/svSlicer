@@ -1,19 +1,28 @@
-# This workflow builds svSlicer. The C++ version is built on Ubuntu and macOS.
+# This workflow builds and tests svSlicer on Linux (Debian) and macOS.
 name: Buildtest
 on: [push, pull_request]
 jobs:
-  build-ubuntu:
+  build-linux:
     runs-on: ubuntu-latest
+    # Ubuntu 24.04's vtk9 package cannot read XML files with raw appended
+    # data since the libexpat security update (Launchpad bug 2058415, VTK
+    # issue 19258), which breaks reading svSlicer's own output. Debian
+    # bookworm's vtk9 (9.1.0+really9.1.0+dfsg2-5+deb12u1) carries the fix.
+    container: debian:bookworm
     steps:
       - uses: actions/checkout@v4
-      - name: Install ubuntu dependencies
-        run: sudo apt update && sudo apt install -y build-essential cmake libgl1-mesa-dev libvtk9-dev qtbase5-dev
+      - name: Install Debian dependencies
+        run: apt-get update && apt-get install -y build-essential cmake libgl1-mesa-dev libvtk9-dev qtbase5-dev
       - name: Build svSlicer
         run: |
           mkdir Release
           cd Release
           cmake -DCMAKE_BUILD_TYPE=Release ..
           cmake --build .
+      - name: Test svSlicer
+        run: |
+          cd Release
+          ctest --output-on-failure
   build-macos:
     runs-on: macos-latest
     steps:
@@ -26,3 +35,7 @@ jobs:
           cd Release
           cmake -DCMAKE_BUILD_TYPE=Release ..
           cmake --build .
+      - name: Test svSlicer
+        run: |
+          cd Release
+          ctest --output-on-failure
